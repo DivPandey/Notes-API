@@ -6,9 +6,9 @@ const crypto = require('crypto');
  * @returns {string} Generated API key
  */
 function generateApiKey(prefix = null) {
-    const keyPrefix = prefix || process.env.API_KEY_PREFIX || 'napi_';
-    const randomBytes = crypto.randomBytes(32).toString('hex');
-    return `${keyPrefix}${randomBytes}`;
+  const keyPrefix = prefix || process.env.API_KEY_PREFIX || 'napi_';
+  const randomBytes = crypto.randomBytes(32).toString('hex');
+  return `${keyPrefix}${randomBytes}`;
 }
 
 /**
@@ -17,25 +17,25 @@ function generateApiKey(prefix = null) {
  * @returns {boolean} Whether the API key has valid format
  */
 function isValidApiKeyFormat(apiKey) {
-    if (!apiKey || typeof apiKey !== 'string') {
-        return false;
-    }
+  if (!apiKey || typeof apiKey !== 'string') {
+    return false;
+  }
 
-    const prefix = process.env.API_KEY_PREFIX || 'napi_';
+  const prefix = process.env.API_KEY_PREFIX || 'napi_';
 
-    // Check if it starts with the correct prefix
-    if (!apiKey.startsWith(prefix)) {
-        return false;
-    }
+  // Check if it starts with the correct prefix
+  if (!apiKey.startsWith(prefix)) {
+    return false;
+  }
 
-    // Check if the rest is a valid hex string (64 characters for 32 bytes)
-    const keyPart = apiKey.slice(prefix.length);
-    const hexRegex = /^[a-f0-9]{64}$/i;
+  // Check if the rest is a valid hex string (64 characters for 32 bytes)
+  const keyPart = apiKey.slice(prefix.length);
+  const hexRegex = /^[a-f0-9]{64}$/i;
 
-    return hexRegex.test(keyPart);
+  return hexRegex.test(keyPart);
 }
 
 module.exports = {
-    generateApiKey,
-    isValidApiKeyFormat
+  generateApiKey,
+  isValidApiKeyFormat
 };
