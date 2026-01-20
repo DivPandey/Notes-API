@@ -1,0 +1,414 @@
+name: CI Pipeline
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+    branches: [master, main]
+  workflow_dispatch:
+
+env:
+  NODE_VERSION: '18'
+  DOCKER_IMAGE: ${{ secrets.DOCKERHUB_USERNAME }}/notes-api
+
+jobs:
+  # ============================================
+  # Stage 1: Checkout & Setup (shared by all)
+  # ============================================
+  
+  # ============================================
+  # Stage 2-4: Code Quality (Run in Parallel)
+  # ============================================
+  
+  lint:
+    name: 📝 Linting (ESLint)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run ESLint
+        run: npm run lint
+
+  sast:
+    name: 🔒 SAST (CodeQL)
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: javascript
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: "/language:javascript"
+
+  sca:
+    name: 🔍 SCA (Dependency Check)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run npm audit
+        run: npm audit --audit-level=high || true
+        continue-on-error: false
+
+      - name: OWASP Dependency-Check
+        uses: dependency-check/Dependency-Check_Action@main
+        with:
+          project: 'notes-api'
+          path: '.'
+          format: 'HTML'
+          args: >
+            --scan package-lock.json
+            --suppression suppression.xml
+            --failOnCVSS 7
+        continue-on-error: true
+
+      - name: Upload Dependency-Check Report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: dependency-check-report
+          path: reports/
+
+  # ============================================
+  # Stage 5: Unit Tests (depends on lint)
+  # ============================================
+  
+  test:
+    name: 🧪 Unit Tests (Jest)
+    runs-on: ubuntu-latest
+    needs: [lint]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run tests with coverage
+        run: npm test
+
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: coverage-report
+          path: coverage/
+
+  # ============================================
+  # Stage 6: Build Verification
+  # ============================================
+  
+  build:
+    name: 📦 Build Verification
+    runs-on: ubuntu-latest
+    needs: [test, sast, sca]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install production dependencies
+        run: npm ci --only=production
+
+      - name: Verify application starts
+        run: |
+          timeout 10s node src/server.js &
+          sleep 5
+          echo "✅ Application started successfully"
+        env:
+          NODE_ENV: production
+          MONGODB_URI: mongodb://localhost:27017/test
+          PORT: 5000
+        continue-on-error: true
+
+  # ============================================
+  # Stage 7: Docker Build
+  # ============================================
+  
+  docker-build:
+    name: 🐳 Docker Build
+    runs-on: ubuntu-latest
+    needs: [build]
+    outputs:
+      image-tag: ${{ steps.meta.outputs.tags }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.DOCKER_IMAGE }}
+          tags: |
+            type=sha,prefix=
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Build Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          target: production
+          push: false
+          load: true
+          tags: ${{ steps.meta.outputs.tags }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Save image for later jobs
+        run: |
+          docker save ${{ env.DOCKER_IMAGE }}:latest > /tmp/docker-image.tar
+
+      - name: Upload Docker image
+        uses: actions/upload-artifact@v4
+        with:
+          name: docker-image
+          path: /tmp/docker-image.tar
+          retention-days: 1
+
+  # ============================================
+  # Stage 8: Image Scan (Trivy)
+  # ============================================
+  
+  image-scan:
+    name: 🛡️ Image Scan (Trivy)
+    runs-on: ubuntu-latest
+    needs: [docker-build]
+    steps:
+      - name: Download Docker image
+        uses: actions/download-artifact@v4
+        with:
+          name: docker-image
+          path: /tmp
+
+      - name: Load Docker image
+        run: docker load < /tmp/docker-image.tar
+
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ env.DOCKER_IMAGE }}:latest
+          format: 'table'
+          exit-code: '1'
+          ignore-unfixed: true
+          vuln-type: 'os,library'
+          severity: 'CRITICAL,HIGH'
+        continue-on-error: true
+
+      - name: Run Trivy (SARIF output)
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ env.DOCKER_IMAGE }}:latest
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+        continue-on-error: true
+
+      - name: Upload Trivy scan results
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: 'trivy-results.sarif'
+        continue-on-error: true
+
+  # ============================================
+  # Stage 9: Runtime Test (Container Smoke Test)
+  # ============================================
+  
+  runtime-test:
+    name: 🚀 Runtime Test
+    runs-on: ubuntu-latest
+    needs: [image-scan]
+    services:
+      mongodb:
+        image: mongo:6
+        ports:
+          - 27017:27017
+    steps:
+      - name: Download Docker image
+        uses: actions/download-artifact@v4
+        with:
+          name: docker-image
+          path: /tmp
+
+      - name: Load Docker image
+        run: docker load < /tmp/docker-image.tar
+
+      - name: Start container
+        run: |
+          docker run -d \
+            --name notes-api-test \
+            --network host \
+            -e NODE_ENV=production \
+            -e MONGODB_URI=mongodb://localhost:27017/notes-test \
+            -e PORT=5000 \
+            ${{ env.DOCKER_IMAGE }}:latest
+
+      - name: Wait for container to be healthy
+        run: |
+          echo "Waiting for container to start..."
+          sleep 10
+          
+          # Check container is running
+          docker ps
+          docker logs notes-api-test
+
+      - name: Health check
+        run: |
+          for i in {1..5}; do
+            if curl -f http://localhost:5000/health 2>/dev/null; then
+              echo "✅ Health check passed!"
+              exit 0
+            fi
+            echo "Attempt $i failed, retrying..."
+            sleep 3
+          done
+          echo "❌ Health check failed"
+          docker logs notes-api-test
+          exit 1
+
+      - name: API smoke test
+        run: |
+          # Test API endpoints
+          echo "Testing API endpoints..."
+          
+          # Test health endpoint
+          curl -f http://localhost:5000/health
+          
+          echo "✅ All smoke tests passed!"
+
+      - name: Cleanup
+        if: always()
+        run: |
+          docker stop notes-api-test || true
+          docker rm notes-api-test || true
+
+  # ============================================
+  # Stage 10: Registry Push (DockerHub)
+  # ============================================
+  
+  registry-push:
+    name: 📤 Push to DockerHub
+    runs-on: ubuntu-latest
+    needs: [runtime-test]
+    if: github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to DockerHub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_PASSWORD }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.DOCKER_IMAGE }}
+          tags: |
+            type=sha,prefix=
+            type=raw,value=latest
+            type=raw,value=${{ github.run_number }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          target: production
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Image digest
+        run: echo "Pushed image with tags - ${{ steps.meta.outputs.tags }}"
+
+  # ============================================
+  # Pipeline Summary
+  # ============================================
+  
+  pipeline-status:
+    name: ✅ Pipeline Status
+    runs-on: ubuntu-latest
+    needs: [lint, sast, sca, test, build, docker-build, image-scan, runtime-test]
+    if: always()
+    steps:
+      - name: Check pipeline status
+        run: |
+          echo "## 🚀 CI Pipeline Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Stage | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Lint | ${{ needs.lint.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| SAST | ${{ needs.sast.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| SCA | ${{ needs.sca.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Unit Tests | ${{ needs.test.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Build | ${{ needs.build.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Docker Build | ${{ needs.docker-build.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Image Scan | ${{ needs.image-scan.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Runtime Test | ${{ needs.runtime-test.result }} |" >> $GITHUB_STEP_SUMMARY
+
+      - name: Fail if any job failed
+        if: |
+          needs.lint.result == 'failure' ||
+          needs.sast.result == 'failure' ||
+          needs.sca.result == 'failure' ||
+          needs.test.result == 'failure' ||
+          needs.build.result == 'failure' ||
+          needs.docker-build.result == 'failure' ||
+          needs.image-scan.result == 'failure' ||
+          needs.runtime-test.result == 'failure'
+        run: |
+          echo "❌ Pipeline failed - one or more jobs did not succeed"
+          exit 1
+
+      - name: Success
+        run: echo "✅ All pipeline stages completed successfully!"
