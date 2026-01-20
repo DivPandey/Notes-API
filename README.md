@@ -4,13 +4,49 @@ A REST API for storing code snippets and notes with tags, search functionality, 
 
 ## Features
 
-- 📝 **Note Management**: Create, read, update, delete notes
-- 🏷️ **Tagging**: Organize notes with tags
-- 🔍 **Search**: Full-text search across notes
-- 🔐 **API Key Auth**: Simple API key-based authentication
-- ⏱️ **Rate Limiting**: Protection against abuse
-- 📊 **Statistics**: User analytics and tag statistics
-- 📖 **Swagger Docs**: Interactive API documentation
+- **Note Management**: Create, read, update, delete notes
+- **Tagging**: Organize notes with tags
+- **Search**: Full-text search across notes
+- **API Key Auth**: Simple API key-based authentication
+- **Rate Limiting**: Protection against abuse
+- **Statistics**: User analytics and tag statistics
+- **Swagger Docs**: Interactive API documentation
+- **CI/CD Pipeline**: Automated testing and deployment
+
+---
+
+## CI/CD Pipeline
+
+This project includes a complete CI/CD pipeline using GitHub Actions.
+
+### Pipeline Overview
+
+```
+git push --> CI Pipeline --> DockerHub --> CD Pipeline --> Kubernetes (AWS EC2)
+```
+
+### CI Pipeline Stages
+
+| Stage | Tool | Purpose |
+|-------|------|---------|
+| Linting | ESLint | Enforce code standards |
+| SAST | CodeQL | Static security analysis |
+| SCA | npm audit + Dependency-Check | Find vulnerable dependencies |
+| Unit Tests | Jest | Validate business logic |
+| Build | Docker | Create container image |
+| Image Scan | Trivy | Scan for vulnerabilities |
+| Runtime Test | curl | Container smoke test |
+| Registry Push | DockerHub | Publish image |
+
+### CD Pipeline Stages
+
+| Stage | Purpose |
+|-------|---------|
+| Deploy to K8s | SSH to EC2, restart pods |
+| Health Check | Verify deployment |
+| DAST | Security headers check |
+
+---
 
 ## Quick Start
 
@@ -18,12 +54,12 @@ A REST API for storing code snippets and notes with tags, search functionality, 
 
 - Node.js 18+
 - MongoDB (local or Atlas)
+- Docker (optional)
 
-### Installation
+### Local Development
 
 ```bash
-# Clone and install
-cd notes-api
+# Install dependencies
 npm install
 
 # Configure environment
@@ -43,6 +79,60 @@ docker-compose up -d
 # View logs
 docker-compose logs -f app
 ```
+
+---
+
+## GitHub Secrets Configuration
+
+To enable CI/CD, add these secrets in GitHub (Settings > Secrets > Actions):
+
+### For CI Pipeline (DockerHub Push)
+
+| Secret | Description |
+|--------|-------------|
+| `DOCKERHUB_USERNAME` | Your DockerHub username |
+| `DOCKERHUB_PASSWORD` | Your DockerHub password |
+
+### For CD Pipeline (EC2 Deployment)
+
+| Secret | Description |
+|--------|-------------|
+| `EC2_HOST` | EC2 instance public IP |
+| `EC2_USER` | SSH user (usually `ubuntu`) |
+| `EC2_SSH_KEY` | Contents of your .pem file |
+
+---
+
+## Infrastructure Setup (Terraform)
+
+### Prerequisites
+
+- AWS CLI configured
+- Terraform installed
+- AWS key pair created
+
+### Deploy to AWS
+
+```bash
+cd terraform
+
+# Initialize Terraform
+terraform init
+
+# Deploy (creates EC2 with K3s + MongoDB + Notes API)
+terraform apply -var="key_name=your-key-pair-name"
+
+# Get app URL
+terraform output app_url
+```
+
+### Cleanup
+
+```bash
+terraform destroy -var="key_name=your-key-pair-name"
+```
+
+---
 
 ## API Endpoints
 
@@ -64,51 +154,15 @@ docker-compose logs -f app
 | PATCH | `/api/notes/:id/favorite` | Toggle favorite |
 | GET | `/api/notes/search?q=query` | Search notes |
 
-### Statistics
+### Utility
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| GET | `/api/stats` | Get user statistics |
-| GET | `/api/stats/tags` | Get most used tags |
+| GET | `/api/health` | Health check |
+| GET | `/api/message` | Deployment test message |
+| GET | `/api/stats` | User statistics |
+| GET | `/api/docs` | Swagger documentation |
 
-### Query Parameters for GET /api/notes
-```
-?tags=react,nodejs      # Filter by tags
-?language=javascript    # Filter by language
-?isSnippet=true         # Filter code snippets
-?favorited=true         # Only favorited
-?sort=createdAt         # Sort by field
-?order=desc             # asc or desc
-?page=1                 # Page number
-?limit=10               # Items per page
-```
-
-## Usage Examples
-
-### Register & Get API Key
-```bash
-curl -X POST http://localhost:5000/api/auth/register \
-  -H "Content-Type: application/json" \
-  -d '{"username": "john", "email": "john@example.com"}'
-```
-
-### Create a Note
-```bash
-curl -X POST http://localhost:5000/api/notes \
-  -H "Content-Type: application/json" \
-  -H "x-api-key: YOUR_API_KEY" \
-  -d '{
-    "title": "React useState Hook",
-    "content": "const [count, setCount] = useState(0);",
-    "language": "javascript",
-    "tags": ["react", "hooks"]
-  }'
-```
-
-### Get All Notes
-```bash
-curl http://localhost:5000/api/notes \
-  -H "x-api-key: YOUR_API_KEY"
-```
+---
 
 ## Testing
 
@@ -123,29 +177,34 @@ npm run test:watch
 npm run lint
 ```
 
-## API Documentation
-
-Visit `/api/docs` for interactive Swagger documentation when the server is running.
+---
 
 ## Project Structure
 
 ```
 notes-api/
+├── .github/workflows/
+│   ├── ci.yml              # CI pipeline
+│   └── cd.yml              # CD pipeline
+├── terraform/              # Infrastructure as Code
+│   ├── main.tf
+│   ├── variables.tf
+│   └── outputs.tf
+├── k8s/                    # Kubernetes manifests
 ├── src/
-│   ├── config/         # Database & app config
-│   ├── controllers/    # Route handlers
-│   ├── middleware/     # Auth, validation, errors
-│   ├── models/         # Mongoose models
-│   ├── routes/         # API routes
-│   ├── utils/          # Helpers & utilities
-│   ├── tests/          # Jest tests
-│   ├── app.js          # Express app setup
-│   └── server.js       # Entry point
-├── .env.example        # Environment template
-├── docker-compose.yml  # Docker setup
-├── Dockerfile          # Container config
-└── package.json        # Dependencies
+│   ├── config/             # Database & app config
+│   ├── controllers/        # Route handlers
+│   ├── middleware/         # Auth, validation, errors
+│   ├── models/             # Mongoose models
+│   ├── routes/             # API routes
+│   ├── tests/              # Jest tests
+│   └── app.js              # Express app
+├── Dockerfile
+├── docker-compose.yml
+└── package.json
 ```
+
+---
 
 ## Environment Variables
 
@@ -158,6 +217,4 @@ notes-api/
 | `RATE_LIMIT_MAX_REQUESTS` | Max requests per window | `100` |
 | `CORS_ORIGIN` | Allowed origins | `*` |
 
-## License
-
-MIT
+---
