@@ -299,7 +299,7 @@ jobs:
       - name: Health check
         run: |
           for i in {1..5}; do
-            if curl -f http://localhost:5000/health 2>/dev/null; then
+            if curl -f http://localhost:5000/api/health 2>/dev/null; then
               echo "Health check passed!"
               exit 0
             fi
@@ -316,7 +316,7 @@ jobs:
           echo "Testing API endpoints..."
           
           # Test health endpoint
-          curl -f http://localhost:5000/health
+          curl -f http://localhost:5000/api/health
           
           echo "All smoke tests passed!"
 
