@@ -13,8 +13,12 @@ const { apiLimiter } = require('./middleware/rateLimiter');
 
 const app = express();
 
-// Security middleware
-app.use(helmet());
+// Security middleware - configure helmet to allow Swagger UI
+app.use(
+  helmet({
+    contentSecurityPolicy: false, // Disable CSP for Swagger UI compatibility
+  })
+);
 app.use(cors({ origin: process.env.CORS_ORIGIN || '*' }));
 
 // Body parser

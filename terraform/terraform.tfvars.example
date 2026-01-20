@@ -1,0 +1,10 @@
+# Example terraform.tfvars file
+# Copy this to terraform.tfvars and fill in your values
+
+key_name           = "your-aws-key-pair-name"
+dockerhub_username = "your-dockerhub-username"
+
+# Optional overrides (defaults are already set)
+# aws_region    = "ap-south-1"
+# instance_type = "t2.medium"
+# ami_id        = "ami-0f5ee92e2d63afc18"

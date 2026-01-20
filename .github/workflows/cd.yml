@@ -1,0 +1,78 @@
+name: CD Pipeline
+
+on:
+  workflow_run:
+    workflows: ["CI Pipeline"]
+    types:
+      - completed
+    branches: [master, main]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    name: Deploy to EC2
+    runs-on: ubuntu-latest
+    if: ${{ github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch' }}
+    
+    steps:
+      - name: Deploy to K3s
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script: |
+            echo "=== Starting Deployment ==="
+            
+            # Restart deployment to pull latest image
+            kubectl rollout restart deployment/notes-api -n notes-api
+            
+            # Wait for rollout to complete
+            kubectl rollout status deployment/notes-api -n notes-api --timeout=120s
+            
+            # Show status
+            echo ""
+            echo "=== Deployment Status ==="
+            kubectl get pods -n notes-api
+            
+            echo ""
+            echo "=== Deployment Complete ==="
+            PUBLIC_IP=$(curl -s http://169.254.169.254/latest/meta-data/public-ipv4)
+            echo "App URL: http://$PUBLIC_IP:30000"
+            echo "Health: http://$PUBLIC_IP:30000/api/health"
+
+      - name: Health Check
+        run: |
+          echo "Waiting for deployment to stabilize..."
+          sleep 15
+          
+          echo "Running health check..."
+          for i in {1..5}; do
+            if curl -sf http://${{ secrets.EC2_HOST }}:30000/api/health; then
+              echo ""
+              echo "Health check passed!"
+              exit 0
+            fi
+            echo "Attempt $i failed, retrying..."
+            sleep 5
+          done
+          echo "Health check failed after 5 attempts"
+          exit 1
+
+  notify:
+    name: Deployment Status
+    runs-on: ubuntu-latest
+    needs: [deploy]
+    if: always()
+    steps:
+      - name: Deployment Summary
+        run: |
+          echo "## CD Pipeline Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          if [ "${{ needs.deploy.result }}" == "success" ]; then
+            echo "Deployment: SUCCESS" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "App URL: http://${{ secrets.EC2_HOST }}:30000" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "Deployment: FAILED" >> $GITHUB_STEP_SUMMARY
+          fi
