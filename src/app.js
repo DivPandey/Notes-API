@@ -49,6 +49,15 @@ app.get('/api/health', (req, res) => {
   });
 });
 
+// Deployment test message - change this to verify CI/CD pipeline
+app.get('/api/message', (req, res) => {
+  res.json({
+    message: 'Hello from Notes API v1.0 - Deployment Test',
+    deployedAt: '2026-01-20',
+    version: '1.0.0'
+  });
+});
+
 // Routes
 app.use('/api/auth', authRoutes);
 app.use('/api/notes', noteRoutes);
