@@ -21,7 +21,7 @@ jobs:
   # ============================================
   
   lint:
-    name: 📝 Linting (ESLint)
+    name: Linting (ESLint)
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -40,7 +40,7 @@ jobs:
         run: npm run lint
 
   sast:
-    name: 🔒 SAST (CodeQL)
+    name: SAST (CodeQL)
     runs-on: ubuntu-latest
     permissions:
       actions: read
@@ -61,7 +61,7 @@ jobs:
           category: "/language:javascript"
 
   sca:
-    name: 🔍 SCA (Dependency Check)
+    name: SCA (Dependency Check)
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -104,7 +104,7 @@ jobs:
   # ============================================
   
   test:
-    name: 🧪 Unit Tests (Jest)
+    name: Unit Tests (Jest)
     runs-on: ubuntu-latest
     needs: [lint]
     steps:
@@ -135,7 +135,7 @@ jobs:
   # ============================================
   
   build:
-    name: 📦 Build Verification
+    name: Build Verification
     runs-on: ubuntu-latest
     needs: [test, sast, sca]
     steps:
@@ -155,7 +155,7 @@ jobs:
         run: |
           timeout 10s node src/server.js &
           sleep 5
-          echo "✅ Application started successfully"
+          echo "Application started successfully"
         env:
           NODE_ENV: production
           MONGODB_URI: mongodb://localhost:27017/test
@@ -167,7 +167,7 @@ jobs:
   # ============================================
   
   docker-build:
-    name: 🐳 Docker Build
+    name: Docker Build
     runs-on: ubuntu-latest
     needs: [build]
     outputs:
@@ -215,7 +215,7 @@ jobs:
   # ============================================
   
   image-scan:
-    name: 🛡️ Image Scan (Trivy)
+    name: Image Scan (Trivy)
     runs-on: ubuntu-latest
     needs: [docker-build]
     steps:
@@ -259,7 +259,7 @@ jobs:
   # ============================================
   
   runtime-test:
-    name: 🚀 Runtime Test
+    name: Runtime Test
     runs-on: ubuntu-latest
     needs: [image-scan]
     services:
@@ -300,13 +300,13 @@ jobs:
         run: |
           for i in {1..5}; do
             if curl -f http://localhost:5000/health 2>/dev/null; then
-              echo "✅ Health check passed!"
+              echo "Health check passed!"
               exit 0
             fi
             echo "Attempt $i failed, retrying..."
             sleep 3
           done
-          echo "❌ Health check failed"
+          echo "Health check failed"
           docker logs notes-api-test
           exit 1
 
@@ -318,7 +318,7 @@ jobs:
           # Test health endpoint
           curl -f http://localhost:5000/health
           
-          echo "✅ All smoke tests passed!"
+          echo "All smoke tests passed!"
 
       - name: Cleanup
         if: always()
@@ -331,7 +331,7 @@ jobs:
   # ============================================
   
   registry-push:
-    name: 📤 Push to DockerHub
+    name: Push to DockerHub
     runs-on: ubuntu-latest
     needs: [runtime-test]
     if: github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main'
@@ -376,14 +376,14 @@ jobs:
   # ============================================
   
   pipeline-status:
-    name: ✅ Pipeline Status
+    name: Pipeline Status
     runs-on: ubuntu-latest
     needs: [lint, sast, sca, test, build, docker-build, image-scan, runtime-test]
     if: always()
     steps:
       - name: Check pipeline status
         run: |
-          echo "## 🚀 CI Pipeline Summary" >> $GITHUB_STEP_SUMMARY
+          echo "## CI Pipeline Summary" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "| Stage | Status |" >> $GITHUB_STEP_SUMMARY
           echo "|-------|--------|" >> $GITHUB_STEP_SUMMARY
@@ -407,8 +407,8 @@ jobs:
           needs.image-scan.result == 'failure' ||
           needs.runtime-test.result == 'failure'
         run: |
-          echo "❌ Pipeline failed - one or more jobs did not succeed"
+          echo "Pipeline failed - one or more jobs did not succeed"
           exit 1
 
       - name: Success
-        run: echo "✅ All pipeline stages completed successfully!"
+        run: echo "All pipeline stages completed successfully!"

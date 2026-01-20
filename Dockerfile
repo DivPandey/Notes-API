@@ -17,6 +17,10 @@ CMD ["npm", "run", "dev"]
 FROM base AS production
 RUN npm ci --only=production && npm cache clean --force
 COPY . .
+
+# Create logs directory with proper permissions for node user
+RUN mkdir -p logs && chown -R node:node /app
+
 EXPOSE 5000
 USER node
 CMD ["node", "src/server.js"]
